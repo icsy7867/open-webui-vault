@@ -1,223 +1,262 @@
-*Testing*
+*TESTING*
 
-# 🔐 Secret Vault — Open WebUI Plugin
+# 🔐 Secret Vault
 
-A per-user secret key/value store for [Open WebUI](https://github.com/open-webui/open-webui) with password-masked inputs and `${{{TOKEN}}}` interpolation. Secrets are never typed into chat — they live in a masked UI and are injected silently before each request reaches the model.
+A per-user secret key/value store for [Open WebUI](https://github.com/open-webui/open-webui). Store API keys, tokens, and passwords in password-masked fields, then reference them anywhere in chat using a simple token syntax — without ever typing a secret in plaintext.
 
-**Version:** 5.3.0 · **Requires:** Open WebUI ≥ 0.6.x · **License:** MIT
-
----
-
-## Why This Exists
-
-Open WebUI has no built-in way to give users persistent, private secrets (API keys, tokens, passwords) that can be referenced in chat or MCP tool configurations without appearing as plaintext. This plugin fills that gap.
+**Tested on Open WebUI v0.8.5**
 
 ---
 
 ## How It Works
 
-The plugin is a single Python file installed **twice** — once as a Tool, once as a Filter:
+Secret Vault installs as both a **Tool** and a **Filter**:
 
-- The **Tool** provides password-masked `UserValves` fields where each user stores their own secrets. Values are stored per-user in the OW-UI database and never appear in chat.
-- The **Filter** intercepts every request before it reaches the model, fetches the requesting user's secrets directly from the database via OW-UI's internal Python API, and resolves any `${{{TOKEN}}}` placeholders found in the request body.
+- The **Tool** provides the per-user password-masked storage UI, where each user enters their own secrets independently.
+- The **Filter** intercepts every request before it reaches the model and resolves `${{{TOKEN}}}` placeholders with the actual secret values — fetched directly from the Open WebUI internal database using the requesting user's ID.
 
-Because the Filter uses OW-UI's internal DB API (not HTTP), it correctly fetches each user's own secrets regardless of who is making the request.
+Secrets are never typed into chat. The model only ever sees the resolved value, not the token syntax.
 
 ---
 
 ## Secret Types
 
-There are two distinct categories of secret, each with different behaviour:
+There are two distinct categories of secrets, each with different visibility guarantees:
 
-| Type | Keys | Behaviour |
-|---|---|---|
-| 👁️ **LLM Secret** | `LLM_SECRET_1` – `LLM_SECRET_6` | Resolved before the request reaches the model. The LLM sees the actual value. |
-| 🔒 **Tool Secret** | `TOOL_SECRET_1` – `TOOL_SECRET_6` | **Never** interpolated in chat. Only accessible by Tool code via `use_tool_secret()`. The LLM only ever sees the token placeholder. |
+### 👁️ LLM Secrets (`LLM_SECRET_1` – `LLM_SECRET_6`)
+
+These are resolved **before** the request reaches the model. When you write `${{{LLM_SECRET_1}}}` in a message, the model sees the actual value. Use these for things the model needs to know: API keys it will pass to tools, configuration values, usernames, etc.
+
+### 🔒 Tool Secrets (`TOOL_SECRET_1` – `TOOL_SECRET_6`)
+
+These are **never** resolved in chat. The `${{{TOOL_SECRET_1}}}` token remains as-is in messages — the model never sees the value. Only Tool code can access tool secrets via `use_tool_secret()`. The Filter also actively scrubs tool secret values from model responses in case they leak via a tool call. Use these for credentials that tools need to make API calls on the user's behalf, where there is no reason for the model to ever see the value.
 
 ---
 
 ## Installation
 
-> The plugin file is installed **twice** — once as a Tool, once as a Function (Filter). Both installs use the same single `secret_vault.py` file.
+Secret Vault requires two installs from the same file.
 
-### Step 1 — Install the Tool
+### Step 1 — Install as a Tool
 
-1. Go to **Workspace → Tools → ➕ Add Tool**
-2. Paste the contents of `secret_vault.py`
-3. Click **Save**
-4. Note the Tool ID from the URL: `/workspace/tools/edit/<TOOL_ID>`
+1. Go to **Workspace → Tools**
+2. Click **+** to add a new tool
+3. Paste the contents of `secret_vault.py`
+4. Save
+5. Note the Tool ID from the URL: `/workspace/tools/edit/<TOOL_ID>`
 
-### Step 2 — Install the Filter
+### Step 2 — Install as a Filter
 
-1. Go to **Admin → Functions → ➕ Add Function**
-2. Paste the same `secret_vault.py` file
-3. Click **Save**, then toggle it **enabled**
-4. Set the scope to **Global** so it applies to all chats
+1. Go to **Admin → Functions**
+2. Click **+** to add a new function
+3. Paste the same `secret_vault.py` file
+4. Save and **enable** the function
+5. Set it to **Global** so it applies to all users
 
 ### Step 3 — Configure the Filter Valves
 
-Click the **⚙️ gear icon** on the Function in Admin → Functions and set:
+Click the **gear icon ⚙️** on the Secret Vault function in Admin → Functions and set:
 
-| Valve | Value | Required |
-|---|---|---|
-| `TOOL_ID` | The ID from Step 1 | ✅ Yes |
-| `OWUI_BASE_URL` | Your OW-UI URL, e.g. `http://localhost:3000` | Only if Strategy 1 fails |
-| `OWUI_API_KEY` | An API key from Settings → Account → API Keys | Only if Strategy 1 fails |
+| Valve | Description |
+|---|---|
+| `TOOL_ID` | The Tool ID from Step 1 (e.g. `abc123def`) |
+| `OWUI_BASE_URL` | Your Open WebUI base URL, e.g. `http://localhost:3000` |
+| `OWUI_API_KEY` | Only needed if internal DB access fails (rare — leave blank to start) |
+| `enabled` | Master on/off switch (default: on) |
+| `warn_on_missing` | Inject a system warning when a token can't be resolved (default: on) |
+| `resolve_admin_system_prompt` | Resolve tokens in admin model system prompts (default: **off** — see Security) |
+| `debug_logging` | Print debug lines to Docker logs (default: off) |
 
-> **Strategy 1 vs Strategy 2:** The Filter first tries to read secrets directly from OW-UI's internal database (no network call, no API key needed). This works in the vast majority of cases. If it fails for any reason, it falls back to a loopback HTTP call using `OWUI_BASE_URL` and `OWUI_API_KEY`.
+### Step 4 — Users Set Their Own Secrets
 
-### Step 4 — Users Set Their Secrets
+Each user sets their own secrets independently — no admin involvement required:
 
-Each user sets their own secrets independently via:
+1. Click the **wrench icon 🔧** in the chat toolbar
+2. Select **Secret Vault**
+3. Click the **person icon 👤** (User Valves)
+4. Enter values into the password-masked fields
 
-**Wrench icon 🔧 in chat → Secret Vault → Person icon 👤 (User Valves)**
-
-All fields render as `••••••••` masked password inputs. The admin cannot see individual users' values.
+All fields are masked (`••••••`) and stored per-user. One user cannot see another user's secrets.
 
 ---
 
 ## Usage
 
-Reference any secret using the triple-brace token syntax anywhere in your chat, system prompt, or MCP configuration:
+Once secrets are set, reference them anywhere using the token syntax:
 
 ```
 ${{{LLM_SECRET_1}}}
 ${{{TOOL_SECRET_1}}}
 ```
 
-### In Chat Messages
+### In chat messages
 
 ```
-Summarise the document at this URL using API key ${{{LLM_SECRET_1}}}
+Summarise the GitHub issues in my repo. Use this token: ${{{LLM_SECRET_1}}}
 ```
 
-The Filter resolves `${{{LLM_SECRET_1}}}` to your actual secret value before the message reaches the model.
+The model receives the actual token value — it never sees the `${{{...}}}` syntax.
 
-### In User System Prompts
-
-Set via Advanced Controls in the chat panel:
-
-```
-You are a helpful assistant.
-My database connection string is ${{{LLM_SECRET_2}}}.
-```
-
-### In the Admin Model System Prompt
-
-Go to **Admin → Settings → Models → [Model] → System Prompt**:
-
-```
-Important context:
-$API_KEY = ${{{LLM_SECRET_1}}}
-```
-
-> ⚠️ This requires the `resolve_admin_system_prompt` Filter valve to be enabled. See [Security Notes](#security-notes) before turning it on.
-
-### In MCP Server Configurations
+### In MCP server environment blocks
 
 ```json
 {
   "env": {
-    "GITHUB_TOKEN": "${{{LLM_SECRET_3}}}",
+    "GITHUB_TOKEN": "${{{LLM_SECRET_1}}}",
     "DATABASE_URL": "${{{LLM_SECRET_2}}}"
   }
 }
 ```
 
----
+Tokens are resolved throughout the entire request body, not just in message text.
 
-## Filter Valves Reference
+### In model system prompts (user-set)
 
-Configured via the **⚙️ gear icon** on the Function in Admin → Functions.
+Tokens in system prompts set by the user via **Chat Controls → Advanced** are resolved automatically.
 
-| Valve | Default | Description |
-|---|---|---|
-| `TOOL_ID` | *(empty)* | ID of the Secret Vault Tool install. Find it in the URL when editing the tool. **Required.** |
-| `OWUI_BASE_URL` | `http://localhost:3000` | Base URL of your OW-UI instance. Used only for HTTP fallback. |
-| `OWUI_API_KEY` | *(empty)* | API key for HTTP fallback. Not needed when internal DB access works. |
-| `enabled` | `true` | Master on/off switch for the entire Filter. |
-| `warn_on_missing` | `true` | Inject a system-prompt warning when an LLM token can't be resolved. Helps users catch typos in token names. |
-| `resolve_admin_system_prompt` | `false` | Resolve tokens in the admin model system prompt. Off by default — see [Security Notes](#security-notes). |
-| `debug_logging` | `false` | Print detailed debug output to Docker/server logs. Useful for troubleshooting. Enable temporarily, then turn off. |
+### In admin model system prompts (opt-in)
+
+Tokens in system prompts set by the admin via **Admin → Models → System Prompt** can also be resolved, but this feature is **off by default**. See the Security section before enabling it.
 
 ---
 
-## Tool Commands
+## Tool Functions
 
-When the Tool is active in a chat, users can ask the model to run these commands:
+When the Tool is enabled in a chat session, two helper commands are available:
 
-**`vault_list`** — List all secret key names that are currently set (values never shown).
+### `vault_list`
 
-**`vault_check KEY_NAME`** — Confirm whether a specific key is set, and whether it's LLM-visible or Tool-only.
+Lists the names of all secrets currently configured. Values are never shown.
 
-**`use_tool_secret KEY_NAME`** — For Tool-only secrets: retrieve the value in Tool code without it ever reaching the LLM. Returns a success/failure confirmation only.
-
----
-
-## Security Notes
-
-### LLM Secrets Are Stored in Chat History
-
-Once an LLM secret is resolved into a message, the actual value is stored in OW-UI's chat history database. Use LLM secrets for values you're comfortable having in database storage (API keys, tokens). For high-rotation passwords, consider Tool secrets instead.
-
-### Tool Secret Masking Has a Minimum Length
-
-Tool secrets are scrubbed from model responses using string replacement. To prevent partial-word corruption (e.g. a secret of `"pass"` would corrupt the word `"password"`), masking only applies to secrets of **12 or more characters**. Real-world secrets (API keys, tokens) are virtually always longer than this — but be aware that very short Tool secret values will not be masked.
-
-### Admin System Prompt Interpolation Is Opt-In
-
-The `resolve_admin_system_prompt` valve is **off by default** for a specific reason: when enabled, a user can set `LLM_SECRET_1` to arbitrary text (including adversarial instructions) which then gets injected verbatim into the admin system prompt. This is a prompt injection risk.
-
-Only enable `resolve_admin_system_prompt` if:
-- You trust all users who can set LLM secrets on this instance, **or**
-- Your instance is single-user
-
-### No Cross-User Secret Leakage
-
-The vault cache is keyed strictly by user ID. Each request fetches fresh from the database, so secret updates take effect immediately on the next message with no server restart required.
-
----
-
-## Troubleshooting
-
-**Tokens are not being resolved**
-
-1. Confirm the Filter is enabled and set to Global (Admin → Functions)
-2. Confirm `TOOL_ID` is set correctly in the Filter Valves — it must match the ID in the Tool's edit URL exactly
-3. Enable `debug_logging` in the Filter Valves, send a test message, then check Docker logs: `docker logs open-webui 2>&1 | grep SECRET_VAULT`
-4. The log line `Strategy 1 OK: N keys` confirms secrets were found. If you see `0 keys`, the user hasn't set any secrets yet via the person icon on the Tool.
-
-**Secrets update not taking effect**
-
-The Filter fetches fresh on every request — no restart needed. If you're still seeing old values, confirm you saved the Valves after editing.
-
-**Admin system prompt tokens not resolving**
-
-Ensure `resolve_admin_system_prompt` is toggled on in the Filter Valves (it is off by default).
-
-**Debug logging shows `Tool not found`**
-
-The `TOOL_ID` in the Filter Valves doesn't match the installed Tool. Navigate to **Workspace → Tools → Secret Vault → Edit** and copy the ID from the URL bar.
-
----
-
-## Known Limitations
-
-- **12 secret slots total** (6 LLM + 6 Tool). Adding more requires editing `_LLM_KEYS` / `_TOOL_KEYS` and adding matching fields to `Tools.UserValves`.
-- **OW-UI `__user__["valves"]` injection is broken for globally-enabled Functions** in tested versions (confirmed via GitHub issue [#7331](https://github.com/open-webui/open-webui/issues/7331)). This plugin works around it by reading the database directly.
-- **Two system messages** may be sent to the model when `resolve_admin_system_prompt` is enabled — the resolved copy injected by the Filter, and OW-UI's raw copy appended afterwards. Most models handle this correctly, treating the first system message as authoritative.
-
----
-
-## Development
-
-Run the self-test suite locally (no OW-UI instance required):
-
-```bash
-python secret_vault.py
+```
+vault_list
 ```
 
-All tests mock the OW-UI database calls, so the full logic can be verified without a running server.
+```
+👁️ LLM-visible:
+  * ${{{LLM_SECRET_1}}}
+  * ${{{LLM_SECRET_2}}}
+🔒 Tool-only:
+  * ${{{TOOL_SECRET_1}}}
+```
+
+### `vault_check`
+
+Confirms whether a specific key is set, and whether it is LLM-visible or tool-only.
+
+```
+vault_check LLM_SECRET_1
+```
+
+```
+👁️ 'LLM_SECRET_1' is set (visible to LLM). Token: ${{{LLM_SECRET_1}}}
+```
+
+### `use_tool_secret`
+
+Retrieves a tool secret value for use within Tool code. The value is never returned to the LLM — only a confirmation message is.
+
+```
+use_tool_secret TOOL_SECRET_1
+```
+
+```
+Tool secret 'TOOL_SECRET_1' retrieved successfully.
+```
+
+---
+
+## Security
+
+### What is protected
+
+- Secrets are entered only through password-masked UI fields — never typed as plaintext in chat
+- LLM secrets are resolved in-flight before the model sees the request — the token syntax never reaches the model
+- **User messages are stored in the database with the original token placeholders intact** — OW-UI saves what the user typed, not the resolved value. Shared chats show `${{{LLM_SECRET_1}}}`, not the secret. Confirmed on OW-UI v0.8.5.
+- Tool secrets are never resolved in chat under any circumstances
+- The Filter actively scrubs tool secret values from model responses (for values ≥ 12 characters)
+- Each user's secrets are stored and fetched independently — no cross-user leakage is possible
+- The vault is fetched fresh on every request — updating a secret takes effect immediately on the next message
+
+### Known limitations
+
+**LLM secret values may appear in the model's response if it echoes them.** While user messages are safely stored as token placeholders, if the model explicitly echoes or references the resolved value in its *response* (e.g. you ask it to "repeat the string back"), that assistant message is stored and shared as plaintext. Design prompts so the model acts on secrets silently rather than repeating them. Use LLM secrets for credentials the model needs to act on (API keys, tokens) — not for values you would be uncomfortable seeing in a model response.
+
+**Admin system prompt interpolation is a prompt injection risk.** If `resolve_admin_system_prompt` is enabled and an admin model system prompt contains `${{{LLM_SECRET_1}}}`, a user could set their `LLM_SECRET_1` to adversarial text such as `"Ignore all previous instructions..."` and have it injected verbatim into the system prompt. This valve is **off by default** for this reason. Only enable it if you trust all users on your instance — it is appropriate for single-user or trusted-team installs.
+
+**Tool secret masking is a backstop, not the primary protection.** Tool secrets are never sent to the model in the first place — that is the primary guarantee. The outlet scrubs tool secret values from model responses as a safety net in case a value leaks via a tool call result. This masking only applies to values of 12 or more characters to avoid partial-word corruption (e.g. a 4-character secret `pass` would mangle the word `password` in responses). Real API keys and tokens are virtually always longer than 12 characters.
+
+---
+
+## Architecture Notes
+
+### Why this approach
+
+Open WebUI's `__user__["valves"]` injection — the documented way for Filters to access per-user settings — does not work for globally-enabled Functions in OW-UI v0.8.5 ([issue #7331](https://github.com/open-webui/open-webui/issues/7331)). The `__user__` dict passed to `inlet` contains the user's ID, name, and role, but no valve data.
+
+Secret Vault works around this by using `__user__["id"]` (which is reliably present) to query the Open WebUI internal database directly:
+
+```python
+from open_webui.models.tools import Tools as OWUITools
+user_valves = OWUITools.get_user_valves_by_id_and_user_id(tool_id, user_id)
+```
+
+Since the Filter runs inside the OW-UI process, it has direct access to the same database without any HTTP round-trip or authentication token. A loopback HTTP fallback using `OWUI_API_KEY` is available for edge cases where the internal import fails.
+
+### Request flow
+
+```
+User sends message
+       │
+       ▼
+Filter inlet()
+  ├── Fetch user vault from DB (fresh every request — no stale secrets)
+  ├── [Optional] Fetch + resolve admin model system prompt
+  ├── Resolve ${{{LLM_SECRET_*}}} tokens throughout entire request body
+  ├── Leave ${{{TOOL_SECRET_*}}} tokens verbatim
+  └── Store vault in request-scoped cache for outlet
+       │
+       ▼
+Model processes request
+(sees resolved LLM values; tool tokens remain as placeholders)
+       │
+       ▼
+Filter outlet()
+  ├── Read vault from request-scoped cache (no extra DB call)
+  └── Scrub any raw TOOL_SECRET_* values from model response
+       │
+       ▼
+User sees response
+```
+
+---
+
+## Adding More Secret Slots
+
+The plugin ships with 6 LLM slots and 6 Tool slots. To add more:
+
+1. Add the new key name to `_LLM_KEYS` or `_TOOL_KEYS` at the top of the file
+2. Add a matching field to `Tools.UserValves`
+3. Reinstall both the Tool and the Filter with the updated file
+
+---
+
+## Changelog
+
+| Version | Changes |
+|---|---|
+| 5.3.0 | Whitespace-only secrets treated as unset; cross-request cache removed so secret updates take effect immediately; `resolve_admin_system_prompt` valve added (off by default); outlet uses request-scoped cache only |
+| 5.2.0 | Admin model system prompt interpolation; debug logging valve |
+| 5.1.0 | OW-UI internal DB access (Strategy 1); HTTP loopback fallback (Strategy 2) |
+| 5.0.0 | LLM/Tool secret split; single-pass body interpolation; outlet tool-secret masking; no secret length leak in `use_tool_secret` |
+| 4.x | Per-user vault via loopback HTTP API |
+| 3.x | Valves-based approach (blocked by OW-UI issue #7331) |
+
+---
+
+## License
+
+MIT
 
 ---
 
