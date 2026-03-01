@@ -6,7 +6,7 @@ There are two types of secrets:
 
 LLM_SECRET_# - These are interpolated through chat and the values are sent to the LLM.
 
-TOOL_SECRETE_# - These values are never sent to the LLM.  These are only used in the backend and are useful for variables and settings within MCP External tool servers.
+TOOL_SECRET_# - These values are never sent to the LLM.  These are only used in the backend and are useful for variables and settings within MCP External tool servers.
 
 New additions - ADMIN System Prompt Interpolation.  An admin can set variables in a models system prompt, and these can then be parsed correctly.  Inside the Admin -> Settings -> Functions, this can be enabled or disabled due to someone being about to include text that may alter an admin's system prompt dramatically.
 
