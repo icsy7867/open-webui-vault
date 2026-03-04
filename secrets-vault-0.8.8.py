@@ -22,16 +22,16 @@ description: >
     servers at the network level (VPN, reverse proxy).
 
   SETUP:
-    1. Install as TOOL   (Workspace -> Tools -> Add Tool)
+    1. Install as TOOL (Workspace -> Tools -> Add Tool)
     2. Install as FILTER (Admin -> Functions -> Add Function, enable, Global)
     3. Configure Filter Valves (gear icon on the Function):
-         TOOL_ID       : from URL when editing tool: /workspace/tools/edit/<ID>
-         OWUI_BASE_URL : e.g. http://localhost:3000  (only needed if Strategy 1 fails)
-         OWUI_API_KEY  : API key                     (only needed if Strategy 1 fails)
+         TOOL_ID : from URL when editing tool: /workspace/tools/edit/<ID>
+         OWUI_BASE_URL : e.g. http://localhost:3000 (only needed if Strategy 1 fails)
+         OWUI_API_KEY : API key (only needed if Strategy 1 fails)
     4. Each user sets secrets via wrench icon -> Secret Vault -> person icon
 
   USAGE:
-    ${{{LLM_SECRET_1}}}  -> resolved in messages before the LLM sees them
+    ${{{LLM_SECRET_1}}} -> resolved in messages before the LLM sees them
     ${{{TOOL_SECRET_1}}} -> never resolved; OW-UI Python Tool code reads raw value
 
   CHANGELOG:
@@ -51,11 +51,11 @@ import urllib.error
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 try:
-    from pydantic import BaseModel, Field  # type: ignore
+    from pydantic import BaseModel, Field # type: ignore
 except ImportError:
-    class BaseModel:  # type: ignore
+    class BaseModel: # type: ignore
         pass
-    def Field(*a, **kw):  # type: ignore
+    def Field(*a, **kw): # type: ignore
         return kw.get("default", None)
 
 
@@ -63,13 +63,13 @@ except ImportError:
 _TOKEN_RE = re.compile(r"\$\{\{\{([A-Za-z0-9_]+)\}\}\}")
 
 # ── key groups ─────────────────────────────────────────────────────────────────
-_LLM_KEYS  = ["LLM_SECRET_1",  "LLM_SECRET_2",  "LLM_SECRET_3",
-              "LLM_SECRET_4",  "LLM_SECRET_5",  "LLM_SECRET_6"]
+_LLM_KEYS = ["LLM_SECRET_1", "LLM_SECRET_2", "LLM_SECRET_3",
+              "LLM_SECRET_4", "LLM_SECRET_5", "LLM_SECRET_6"]
 _TOOL_KEYS = ["TOOL_SECRET_1", "TOOL_SECRET_2", "TOOL_SECRET_3",
               "TOOL_SECRET_4", "TOOL_SECRET_5", "TOOL_SECRET_6"]
 
-_ALL_KEYS     = _LLM_KEYS + _TOOL_KEYS
-_LLM_KEY_SET  = set(_LLM_KEYS)
+_ALL_KEYS = _LLM_KEYS + _TOOL_KEYS
+_LLM_KEY_SET = set(_LLM_KEYS)
 _TOOL_KEY_SET = set(_TOOL_KEYS)
 
 # Minimum secret value length for response scrubbing.
@@ -191,8 +191,8 @@ class Tools:
     Secret Vault — per-user password-masked secret store.
 
     Two secret types:
-      👁️  LLM_SECRET_*  : resolved in chat messages; the LLM sees the value.
-      🔒  TOOL_SECRET_* : never resolved in chat; Python Tool code reads via
+      👁️ LLM_SECRET_* : resolved in chat messages; the LLM sees the value.
+      🔒 TOOL_SECRET_* : never resolved in chat; Python Tool code reads via
                           use_tool_secret().
 
     Users set secrets via: wrench icon 🔧 in chat → Secret Vault → person icon 👤
@@ -226,14 +226,14 @@ class Tools:
                 "Your vault is empty.\n"
                 "Set secrets via wrench icon 🔧 → Secret Vault → person icon 👤."
             )
-        llm_keys  = sorted(k for k in vault if k in _LLM_KEY_SET)
+        llm_keys = sorted(k for k in vault if k in _LLM_KEY_SET)
         tool_keys = sorted(k for k in vault if k in _TOOL_KEY_SET)
         lines: List[str] = [f"Vault has {len(vault)} secret(s):"]
         for heading, keys in [("👁️ LLM-visible", llm_keys),
-                               ("🔒 Tool-only",   tool_keys)]:
+                               ("🔒 Tool-only", tool_keys)]:
             if keys:
                 lines.append(heading + ":")
-                lines += [f"  * `${{{{{{{k}}}}}}}`" for k in keys]
+                lines += [f" * `${{{{{{{k}}}}}}}`" for k in keys]
         return "\n".join(lines)
 
     async def vault_check(self, key: str) -> str:
@@ -243,7 +243,7 @@ class Tools:
         """
         vault = _vault_from_obj(self.user_valves) if self.user_valves else {}
         if key in vault:
-            kind  = "🔒 Tool-only" if key in _TOOL_KEY_SET else "👁️ LLM-visible"
+            kind = "🔒 Tool-only" if key in _TOOL_KEY_SET else "👁️ LLM-visible"
             token = f"${{{{{{{key}}}}}}}"
             return f"{kind} '{key}' is set. Token: `{token}`"
         available = ", ".join(sorted(vault)) if vault else "(none set)"
@@ -283,6 +283,10 @@ class Filter:
       2. Optionally resolves tokens in the admin model system prompt (opt-in).
       3. Resolves LLM_SECRET_* tokens throughout the request body.
          TOOL_SECRET_* tokens are never touched.
+      4. Scrubs resolved secret values from conversation history (all messages
+         except the current one) so they never appear in tool call UI blocks.
+         The current user message is intentionally left intact so the LLM
+         receives the resolved value.
 
     outlet():
       Scrubs ALL secret values (both LLM and Tool) from the model's response
@@ -372,7 +376,7 @@ class Filter:
 
         # Strategy 1: direct DB access via OW-UI internal Python API
         try:
-            from open_webui.models.tools import Tools as OWUITools  # type: ignore
+            from open_webui.models.tools import Tools as OWUITools # type: ignore
             if OWUITools.get_tool_by_id(tool_id) is None:
                 self._log(f"Tool not found: {tool_id!r}")
                 return {}
@@ -390,7 +394,7 @@ class Filter:
             self._log(f"Strategy 1 failed: {exc}")
 
         # Strategy 2: loopback HTTP
-        base    = getattr(self.valves, "OWUI_BASE_URL", "http://localhost:3000").rstrip("/")
+        base = getattr(self.valves, "OWUI_BASE_URL", "http://localhost:3000").rstrip("/")
         api_key = getattr(self.valves, "OWUI_API_KEY", "").strip()
         if not api_key:
             self._log("Strategy 2: OWUI_API_KEY not set, giving up")
@@ -419,7 +423,7 @@ class Filter:
         if not model_id:
             return ""
         try:
-            from open_webui.models.models import Models as OWUIModels  # type: ignore
+            from open_webui.models.models import Models as OWUIModels # type: ignore
             model = OWUIModels.get_model_by_id(model_id)
             if model is None:
                 return ""
@@ -450,7 +454,7 @@ class Filter:
             return body
 
         model_id = body.get("model", "")
-        vault    = self._fetch_user_vault(user_id)
+        vault = self._fetch_user_vault(user_id)
 
         # Stash for outlet (same request, avoids second DB call)
         self._request_cache[user_id] = vault
@@ -483,7 +487,20 @@ class Filter:
         # ── Resolve LLM tokens throughout the request body ────────────────────
         body, missing_llm = _interpolate_body(body, vault)
 
+        # ── Scrub resolved values from conversation history ───────────────────
+        # After resolution, raw secret values may exist in prior turns (e.g.
+        # tool call argument blocks in history). We scrub all messages except
+        # the last one (the current user message) so the LLM still receives
+        # the resolved value while history is kept clean in the UI.
+        messages = body.get("messages", [])
+        if len(messages) > 1:
+            history = messages[:-1]
+            current = messages[-1]
+            scrubbed = _scrub_body({"m": history}, vault)["m"]
+            body["messages"] = scrubbed + [current]
+
         # ── Warn about unresolved LLM tokens ──────────────────────────────────
+
         unique_missing = sorted(set(missing_llm))
         if unique_missing and getattr(self.valves, "warn_on_missing", True):
             warning = (
@@ -534,7 +551,7 @@ class Filter:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Self-test   python secret_vault.py
+# Self-test python secret_vault.py
 # ══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
@@ -546,9 +563,9 @@ if __name__ == "__main__":
     def check(name: str, cond: bool, detail: str = "") -> None:
         checks.append((name, cond))
         if cond:
-            print(f"PASS  {name}")
+            print(f"PASS {name}")
         else:
-            print(f"FAIL  {name}" + (f"\n      {detail}" if detail else ""))
+            print(f"FAIL {name}" + (f"\n {detail}" if detail else ""))
 
     # ── 1. Token format ──────────────────────────────────────────────────────
     _k = "LLM_SECRET_1"
@@ -557,33 +574,33 @@ if __name__ == "__main__":
 
     # ── 2. _vault_from_obj: whitespace strip ─────────────────────────────────
     raw_obj = {
-        "LLM_SECRET_1": "   ",
+        "LLM_SECRET_1": " ",
         "LLM_SECRET_2": "real-value",
-        "TOOL_SECRET_1": "  \t  ",
+        "TOOL_SECRET_1": " \t ",
         "TOOL_SECRET_2": "tool-val",
     }
     v = _vault_from_obj(raw_obj)
-    check("vault: whitespace-only excluded",  "LLM_SECRET_1" not in v and "TOOL_SECRET_1" not in v)
-    check("vault: real LLM value kept",       v.get("LLM_SECRET_2") == "real-value")
-    check("vault: real TOOL value kept",      v.get("TOOL_SECRET_2") == "tool-val")
+    check("vault: whitespace-only excluded", "LLM_SECRET_1" not in v and "TOOL_SECRET_1" not in v)
+    check("vault: real LLM value kept", v.get("LLM_SECRET_2") == "real-value")
+    check("vault: real TOOL value kept", v.get("TOOL_SECRET_2") == "tool-val")
 
     # ── 3. _vault_from_obj: Pydantic v2 model_dump ───────────────────────────
     class FakePydanticV2:
         def model_dump(self):
             return {"LLM_SECRET_1": "from-v2", "TOOL_SECRET_1": "tool-v2"}
     v2 = _vault_from_obj(FakePydanticV2())
-    check("vault: pydantic v2 model_dump",    v2.get("LLM_SECRET_1") == "from-v2")
-    check("vault: pydantic v2 tool key",      v2.get("TOOL_SECRET_1") == "tool-v2")
+    check("vault: pydantic v2 model_dump", v2.get("LLM_SECRET_1") == "from-v2")
+    check("vault: pydantic v2 tool key", v2.get("TOOL_SECRET_1") == "tool-v2")
 
     # ── 4. _vault_from_obj: Pydantic v1 dict ─────────────────────────────────
     class FakePydanticV1:
         def dict(self):
             return {"LLM_SECRET_2": "from-v1"}
     v1 = _vault_from_obj(FakePydanticV1())
-    check("vault: pydantic v1 dict",          v1.get("LLM_SECRET_2") == "from-v1")
+    check("vault: pydantic v1 dict", v1.get("LLM_SECRET_2") == "from-v1")
 
     # ── 5. _vault_from_obj: None safe ────────────────────────────────────────
-    check("vault: None returns empty dict",   _vault_from_obj(None) == {})
+    check("vault: None returns empty dict", _vault_from_obj(None) == {})
 
     # ── 6. _interpolate_body ─────────────────────────────────────────────────
     vault = {"LLM_SECRET_1": "llm-value", "TOOL_SECRET_1": "tool-value"}
@@ -591,11 +608,11 @@ if __name__ == "__main__":
         "content": "llm=${{{LLM_SECRET_1}}} tool=${{{TOOL_SECRET_1}}} miss=${{{LLM_SECRET_2}}}"}]}
     result, missing = _interpolate_body(body, vault)
     msg = result["messages"][0]["content"]
-    check("interp: LLM resolved",          "llm-value"            in msg, msg)
-    check("interp: TOOL left verbatim",    "${{{TOOL_SECRET_1}}}" in msg, msg)
-    check("interp: missing LLM reported",  missing == ["LLM_SECRET_2"], str(missing))
-    check("interp: TOOL not in missing",   "TOOL_SECRET_1" not in missing)
-    check("interp: no double-count",       missing.count("LLM_SECRET_2") == 1)
+    check("interp: LLM resolved", "llm-value" in msg, msg)
+    check("interp: TOOL left verbatim", "${{{TOOL_SECRET_1}}}" in msg, msg)
+    check("interp: missing LLM reported", missing == ["LLM_SECRET_2"], str(missing))
+    check("interp: TOOL not in missing", "TOOL_SECRET_1" not in missing)
+    check("interp: no double-count", missing.count("LLM_SECRET_2") == 1)
 
     result2, missing2 = _interpolate_body(
         {"messages": [{"role": "user", "content": "${{{LLM_SECRET_1}}}"}]}, {}
@@ -604,20 +621,20 @@ if __name__ == "__main__":
           result2["messages"][0]["content"] == "${{{LLM_SECRET_1}}}")
 
     # ── 7. _scrub_body: scrubs both LLM and TOOL secrets ─────────────────────
-    long_tool = "sk-abc123def456ghi789xyz"   # 23 chars
-    long_llm  = "llm-visible-value-1234567"  # 24 chars
-    short_val = "pass"                        # 4 chars -- must NOT be masked
+    long_tool = "sk-abc123def456ghi789xyz" # 23 chars
+    long_llm = "llm-visible-value-1234567" # 24 chars
+    short_val = "pass" # 4 chars -- must NOT be masked
     scrub_v = {
-        "LLM_SECRET_1":  long_llm,
+        "LLM_SECRET_1": long_llm,
         "TOOL_SECRET_1": long_tool,
         "TOOL_SECRET_2": short_val,
     }
     body3 = {"messages": [{"role": "assistant",
         "content": f"tool={long_tool} llm={long_llm} short={short_val}"}]}
     out3 = _scrub_body(body3, scrub_v)["messages"][0]["content"]
-    check("scrub: long TOOL replaced",     "${{{TOOL_SECRET_1}}}" in out3, out3)
-    check("scrub: long LLM replaced",      "${{{LLM_SECRET_1}}}"  in out3, out3)
-    check("scrub: short NOT replaced",     short_val in out3, out3)
+    check("scrub: long TOOL replaced", "${{{TOOL_SECRET_1}}}" in out3, out3)
+    check("scrub: long LLM replaced", "${{{LLM_SECRET_1}}}" in out3, out3)
+    check("scrub: short NOT replaced", short_val in out3, out3)
 
     # ── 8. No ReDoS ──────────────────────────────────────────────────────────
     t0 = time.perf_counter()
@@ -631,12 +648,12 @@ if __name__ == "__main__":
         uv.TOOL_SECRET_1 = "some-secret-value"
         t.user_valves = uv
         r1 = await t.use_tool_secret("TOOL_SECRET_1")
-        check("use_tool_secret: success",          "successfully" in r1.lower(), r1)
+        check("use_tool_secret: success", "successfully" in r1.lower(), r1)
         check("use_tool_secret: value not in msg", "some-secret" not in r1, r1)
         r2 = await t.use_tool_secret("TOOL_SECRET_2")
-        check("use_tool_secret: unset msg",        "not set" in r2.lower(), r2)
+        check("use_tool_secret: unset msg", "not set" in r2.lower(), r2)
         r3 = await t.use_tool_secret("LLM_SECRET_1")
-        check("use_tool_secret: rejects LLM",      "not a tool secret" in r3.lower(), r3)
+        check("use_tool_secret: rejects LLM", "not a tool secret" in r3.lower(), r3)
     asyncio.run(run_tool_tests())
 
     # ── 10. Filter.inlet end-to-end ──────────────────────────────────────────
@@ -645,7 +662,7 @@ if __name__ == "__main__":
         f.valves.enabled = True
         f.valves.warn_on_missing = True
         f.valves.resolve_admin_system_prompt = False
-        f._fetch_user_vault          = lambda uid: {
+        f._fetch_user_vault = lambda uid: {
             "LLM_SECRET_1": "my-llm-key",
             "TOOL_SECRET_1": "my-tool-secret-abc",
         }
@@ -656,36 +673,61 @@ if __name__ == "__main__":
                 "llm=${{{LLM_SECRET_1}}} tool=${{{TOOL_SECRET_1}}} miss=${{{LLM_SECRET_2}}}"}],
         }
         result = await f.inlet(body_in, __user__={"id": "u1"})
-        msgs     = result["messages"]
+        msgs = result["messages"]
         user_msg = next(m for m in msgs if m["role"] == "user")["content"]
-        sys_msg  = next((m for m in msgs if m["role"] == "system"), None)
-        check("inlet: LLM resolved",          "my-llm-key"          in user_msg, user_msg)
-        check("inlet: TOOL verbatim",         "${{{TOOL_SECRET_1}}}" in user_msg, user_msg)
-        check("inlet: warn for missing",      sys_msg is not None)
+        sys_msg = next((m for m in msgs if m["role"] == "system"), None)
+        check("inlet: LLM resolved", "my-llm-key" in user_msg, user_msg)
+        check("inlet: TOOL verbatim", "${{{TOOL_SECRET_1}}}" in user_msg, user_msg)
+        check("inlet: warn for missing", sys_msg is not None)
         check("inlet: warn names missing key",
               sys_msg and "LLM_SECRET_2" in sys_msg["content"], str(sys_msg))
         check("inlet: warn omits TOOL key",
               sys_msg and "TOOL_SECRET_1" not in sys_msg["content"], str(sys_msg))
-        check("inlet: cache populated",       "u1" in f._request_cache)
+        check("inlet: cache populated", "u1" in f._request_cache)
         # Confirm resolved value is NOT re-masked by inlet (the 6.1.0 bug)
         check("inlet: resolved value not re-masked",
               "${{{LLM_SECRET_1}}}" not in user_msg, user_msg)
+
+        # History scrubbing: prior message containing the raw secret should be
+        # scrubbed; current (last) user message must keep the resolved value
+        f2 = Filter()
+        f2.valves.enabled = True
+        f2.valves.warn_on_missing = False
+        f2.valves.resolve_admin_system_prompt = False
+        f2._fetch_user_vault = lambda uid: {"LLM_SECRET_1": "my-llm-key-abcdef"}
+        f2._fetch_model_system_prompt = lambda mid: ""
+        body2 = {
+            "model": "test-model",
+            "messages": [
+                {"role": "assistant", "content": "I used my-llm-key-abcdef earlier"},
+                {"role": "user", "content": "use ${{{LLM_SECRET_1}}} again"},
+            ],
+        }
+        result2 = await f2.inlet(body2, __user__={"id": "u9"})
+        history_msg = result2["messages"][0]["content"]
+        current_msg = result2["messages"][1]["content"]
+        check("inlet: history secret scrubbed",
+              "${{{LLM_SECRET_1}}}" in history_msg and "my-llm-key-abcdef" not in history_msg,
+              history_msg)
+        check("inlet: current message resolved not scrubbed",
+              "my-llm-key-abcdef" in current_msg,
+              current_msg)
     asyncio.run(run_inlet_tests())
 
     # ── 11. Filter.outlet scrubs both LLM and TOOL secrets ───────────────────
     async def run_outlet_tests():
         f = Filter()
         f._request_cache["u2"] = {
-            "LLM_SECRET_1":  "my-llm-key-abcdef1234",
+            "LLM_SECRET_1": "my-llm-key-abcdef1234",
             "TOOL_SECRET_1": "my-tool-secret-abc123",
         }
         body_out = {"messages": [{"role": "assistant",
             "content": "tool=my-tool-secret-abc123 llm=my-llm-key-abcdef1234"}]}
         result = await f.outlet(body_out, __user__={"id": "u2"})
         out = result["messages"][0]["content"]
-        check("outlet: TOOL value scrubbed",    "${{{TOOL_SECRET_1}}}" in out, out)
-        check("outlet: LLM value scrubbed",     "${{{LLM_SECRET_1}}}"  in out, out)
-        check("outlet: cache popped",           "u2" not in f._request_cache)
+        check("outlet: TOOL value scrubbed", "${{{TOOL_SECRET_1}}}" in out, out)
+        check("outlet: LLM value scrubbed", "${{{LLM_SECRET_1}}}" in out, out)
+        check("outlet: cache popped", "u2" not in f._request_cache)
         body_pass = {"messages": [{"role": "assistant", "content": "hello"}]}
         result_pass = await f.outlet(body_pass, __user__={"id": "unknown"})
         check("outlet: no cache -> passthrough", result_pass == body_pass)
@@ -700,7 +742,7 @@ if __name__ == "__main__":
         def mock_fetch(uid):
             count[0] += 1
             return {"LLM_SECRET_1": "value-" + str(count[0])}
-        f._fetch_user_vault          = mock_fetch
+        f._fetch_user_vault = mock_fetch
         f._fetch_model_system_prompt = lambda mid: ""
         for _ in range(3):
             await f.inlet({"model": "m", "messages": [{"role": "user", "content": "hi"}]},
@@ -715,7 +757,7 @@ if __name__ == "__main__":
             f = Filter()
             f.valves.warn_on_missing = False
             f.valves.resolve_admin_system_prompt = valve
-            f._fetch_user_vault          = lambda uid: vault
+            f._fetch_user_vault = lambda uid: vault
             f._fetch_model_system_prompt = lambda mid: prompt
             return f
 
@@ -731,7 +773,7 @@ if __name__ == "__main__":
             {"model": "m", "messages": [{"role": "user", "content": "hi"}]},
             __user__={"id": "u5"})
         sys_on = [m for m in r_on["messages"] if m["role"] == "system"]
-        check("admin prompt: injected when valve=True",    len(sys_on) == 1)
+        check("admin prompt: injected when valve=True", len(sys_on) == 1)
         check("admin prompt: token resolved",
               sys_on and "secret-val" in sys_on[0]["content"], str(sys_on))
         check("admin prompt: raw token absent",
@@ -744,6 +786,6 @@ if __name__ == "__main__":
     if failed:
         print(f"FAILED {len(failed)}/{len(checks)}:")
         for name in failed:
-            print(f"  ✗ {name}")
+            print(f" ✗ {name}")
     else:
         print(f"All {len(checks)} checks passed ✓")
